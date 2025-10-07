@@ -1,0 +1,317 @@
+"""
+台積電 ADR 換算 API 服務
+負責處理所有核心邏輯，包括資料抓取、快取管理、計算等
+"""
+
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import requests
+import datetime
+import json
+import os
+from typing import Optional, Dict, Any
+import pandas as pd
+from contextlib import asynccontextmanager
+
+# 環境變數設定
+ALPHA_VANTAGE_API_KEY = os.getenv('ALPHA_VANTAGE_API_KEY', 'YOUR_API_KEY_HERE')
+CACHE_FILE = "daily_prices_cache.json"
+HISTORY_CACHE_FILE = "price_history_cache.json"
+
+app = FastAPI(
+    title="台積電 ADR 換算 API",
+    description="提供台積電 ADR 與台股換算功能的後端 API 服務",
+    version="1.0.0"
+)
+
+# CORS 設定
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ===============================
+# 資料模型
+# ===============================
+class ConversionRequest(BaseModel):
+    adr_price: float
+    usd_twd: float
+
+class ConversionResponse(BaseModel):
+    converted_price: float
+    formula_explanation: str
+    compared_to_tw_price: Optional[Dict[str, Any]] = None
+
+class PriceData(BaseModel):
+    adr_price: Optional[float]
+    tw_price: Optional[float]
+    usd_twd: Optional[float]
+    last_updated: Optional[str]
+    cache_date: Optional[str]
+
+# ===============================
+# 快取管理函數
+# ===============================
+def load_cache():
+    """讀取本地快取的每日價格資料"""
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_cache(data):
+    """儲存每日價格資料到本地快取"""
+    try:
+        with open(CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"無法儲存快取: {e}")
+
+def load_history_cache():
+    """讀取歷史價格資料"""
+    if os.path.exists(HISTORY_CACHE_FILE):
+        try:
+            with open(HISTORY_CACHE_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_history_cache(data):
+    """儲存歷史價格資料"""
+    try:
+        with open(HISTORY_CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"無法儲存歷史快取: {e}")
+
+def is_cache_valid(cache_data):
+    """檢查快取是否是今天的資料"""
+    today = datetime.date.today().isoformat()
+    return cache_data.get('date') == today
+
+# ===============================
+# 核心業務邏輯函數
+# ===============================
+def fetch_adr_price():
+    """從 Alpha Vantage 抓取 ADR 價格"""
+    try:
+        url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=TSM&apikey={ALPHA_VANTAGE_API_KEY}"
+        res = requests.get(url, timeout=10)
+        data = res.json()
+        
+        if "Global Quote" in data:
+            return float(data["Global Quote"]["05. price"])
+        else:
+            return None
+    except Exception as e:
+        print(f"無法取得 ADR 價格: {e}")
+        return None
+
+def fetch_tw_price():
+    """從台灣證交所抓取台積電股價"""
+    try:
+        url = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_2330.tw"
+        res = requests.get(url, verify=False, timeout=5)
+        data = res.json()
+        
+        msg = data.get("msgArray", [])
+        if msg:
+            price = msg[0].get("z") or msg[0].get("p")
+            if price and price != "-":
+                return float(price)
+        return None
+    except Exception as e:
+        print(f"無法取得台股價格: {e}")
+        return None
+
+def fetch_usd_twd():
+    """從台灣銀行抓取美元匯率"""
+    try:
+        url = "https://rate.bot.com.tw/xrt/flcsv/0/day"
+        res = requests.get(url, verify=False, timeout=10)
+        usd_row = [r for r in res.text.split("\n") if "USD" in r]
+        if usd_row:
+            return float(usd_row[0].split(",")[12])
+        return None
+    except Exception as e:
+        print(f"無法取得匯率: {e}")
+        return None
+
+def get_cached_prices():
+    """取得快取的價格資料"""
+    cache = load_cache()
+    
+    if is_cache_valid(cache):
+        return {
+            'adr_price': cache.get('adr_price'),
+            'tw_price': cache.get('tw_price'),
+            'usd_twd': cache.get('usd_twd'),
+            'last_updated': cache.get('last_updated'),
+            'cache_date': cache.get('date')
+        }
+    
+    # 快取過期，重新抓取
+    adr_price = fetch_adr_price()
+    tw_price = fetch_tw_price()
+    usd_twd = fetch_usd_twd()
+    
+    # 更新快取
+    today = datetime.date.today().isoformat()
+    now = datetime.datetime.now().isoformat()
+    
+    cache = {
+        'date': today,
+        'adr_price': adr_price,
+        'tw_price': tw_price,
+        'usd_twd': usd_twd,
+        'last_updated': now
+    }
+    save_cache(cache)
+    
+    return {
+        'adr_price': adr_price,
+        'tw_price': tw_price,
+        'usd_twd': usd_twd,
+        'last_updated': now,
+        'cache_date': today
+    }
+
+def fetch_historical_data():
+    """抓取歷史資料"""
+    history = load_history_cache()
+    today = datetime.date.today().isoformat()
+    
+    # 檢查是否今天已經更新過
+    if history.get('last_fetch_date') == today:
+        return history
+    
+    try:
+        # 抓取 ADR 歷史資料
+        url = f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=TSM&apikey={ALPHA_VANTAGE_API_KEY}"
+        res = requests.get(url, timeout=15)
+        data = res.json()
+        
+        if "Time Series (Daily)" in data:
+            daily_data = data["Time Series (Daily)"]
+            
+            # 處理過去30天的資料
+            for date_str, adr_data in list(daily_data.items())[:30]:
+                try:
+                    adr_price = float(adr_data["4. close"])
+                    
+                    # 簡化估算台股和匯率
+                    usd_twd = 32.0  # 可接入真實匯率API
+                    tw_price = adr_price * 5 * usd_twd / 32.0
+                    
+                    history[date_str] = {
+                        'adr_price': adr_price,
+                        'tw_price': tw_price,
+                        'usd_twd': usd_twd,
+                        'timestamp': f"{date_str}T16:00:00"
+                    }
+                except Exception:
+                    continue
+            
+            history['last_fetch_date'] = today
+            save_history_cache(history)
+    
+    except Exception as e:
+        print(f"無法取得歷史資料: {e}")
+    
+    return history
+
+# ===============================
+# API 路由
+# ===============================
+@app.get("/")
+async def root():
+    return {"message": "台積電 ADR 換算 API 服務"}
+
+@app.get("/api/prices", response_model=PriceData)
+async def get_current_prices():
+    """取得當前價格資料"""
+    try:
+        prices = get_cached_prices()
+        return PriceData(**prices)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/convert", response_model=ConversionResponse)
+async def convert_adr_to_tw(request: ConversionRequest):
+    """ADR 價格換算成台股價格"""
+    try:
+        converted_price = (request.adr_price / 5) * request.usd_twd
+        formula = f"台股價格 = ADR價格 ÷ 5 × 匯率 = {request.adr_price:.2f} ÷ 5 × {request.usd_twd:.2f} = {converted_price:.2f} 元"
+        
+        # 取得台股參考價格進行比較
+        current_prices = get_cached_prices()
+        compared_data = None
+        
+        if current_prices['tw_price']:
+            diff = converted_price - current_prices['tw_price']
+            diff_percent = (diff / current_prices['tw_price']) * 100
+            compared_data = {
+                'tw_reference_price': current_prices['tw_price'],
+                'difference': diff,
+                'difference_percent': diff_percent
+            }
+        
+        return ConversionResponse(
+            converted_price=converted_price,
+            formula_explanation=formula,
+            compared_to_tw_price=compared_data
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/historical")
+async def get_historical_data():
+    """取得歷史價差資料"""
+    try:
+        history = fetch_historical_data()
+        
+        # 整理過去30天的資料
+        today = datetime.date.today()
+        historical_data = []
+        
+        for i in range(30, 0, -1):
+            date = today - datetime.timedelta(days=i)
+            date_str = date.isoformat()
+            
+            if date_str in history and isinstance(history[date_str], dict):
+                record = history[date_str]
+                if all(key in record for key in ['adr_price', 'tw_price', 'usd_twd']):
+                    adr_in_twd = (record['adr_price'] / 5) * record['usd_twd']
+                    difference = adr_in_twd - record['tw_price']
+                    difference_percent = (difference / record['tw_price']) * 100
+                    
+                    historical_data.append({
+                        'date': date_str,
+                        'adr_price_usd': record['adr_price'],
+                        'tw_price': record['tw_price'],
+                        'usd_twd': record['usd_twd'],
+                        'adr_in_twd': adr_in_twd,
+                        'difference': difference,
+                        'difference_percent': difference_percent
+                    })
+        
+        return {"data": historical_data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/health")
+async def health_check():
+    """健康檢查"""
+    return {"status": "healthy", "timestamp": datetime.datetime.now().isoformat()}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
