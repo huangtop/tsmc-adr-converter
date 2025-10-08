@@ -11,29 +11,45 @@ from plotly.subplots import make_subplots
 import os
 from datetime import datetime
 
-# 後端 API 設定
-API_BASE_URL = os.getenv('API_BASE_URL', 'http://localhost:8000')
+# 後端 API 設定 - 優先使用雲端部署版本
+API_BASE_URL = os.getenv('API_BASE_URL', 'https://your-app-name.railway.app')
+
+# 備用 API 端點（如果你有多個部署）
+FALLBACK_URLS = [
+    'https://your-app-name.railway.app',
+    'https://your-app-name.onrender.com',
+    'http://localhost:8000'  # 本地開發時的備用
+]
 
 # ===============================
 # API 呼叫函數
 # ===============================
 def call_api(endpoint, method='GET', data=None):
-    """統一的 API 呼叫函數"""
-    try:
-        url = f"{API_BASE_URL}{endpoint}"
-        if method == 'GET':
-            response = requests.get(url, timeout=10)
-        elif method == 'POST':
-            response = requests.post(url, json=data, timeout=10)
-        
-        if response.status_code == 200:
-            return response.json()
-        else:
-            st.error(f"API 錯誤: {response.status_code}")
+    """統一的 API 呼叫函數，支援多個端點容錯"""
+    urls_to_try = [API_BASE_URL] + [url for url in FALLBACK_URLS if url != API_BASE_URL]
+    
+    for i, base_url in enumerate(urls_to_try):
+        try:
+            url = f"{base_url}{endpoint}"
+            if method == 'GET':
+                response = requests.get(url, timeout=15)
+            elif method == 'POST':
+                response = requests.post(url, json=data, timeout=15)
+            
+            if response.status_code == 200:
+                if i > 0:  # 如果不是第一個 URL 成功，顯示訊息
+                    st.info(f"✅ 連接到備用服務: {base_url}")
+                return response.json()
+            else:
+                if i < len(urls_to_try) - 1:  # 不是最後一個，繼續嘗試
+                    continue
+                st.error(f"API 錯誤: {response.status_code}")
+                return None
+        except requests.exceptions.RequestException as e:
+            if i < len(urls_to_try) - 1:  # 不是最後一個，繼續嘗試下一個
+                continue
+            st.error(f"連線錯誤: 所有服務都無法連接")
             return None
-    except requests.exceptions.RequestException as e:
-        st.error(f"連線錯誤: {e}")
-        return None
 
 def get_current_prices():
     """取得當前價格資料"""
