@@ -18,6 +18,11 @@ from contextlib import asynccontextmanager
 ALPHA_VANTAGE_API_KEY = os.getenv('ALPHA_VANTAGE_API_KEY', 'YOUR_API_KEY_HERE')
 CACHE_FILE = "daily_prices_cache.json"
 HISTORY_CACHE_FILE = "price_history_cache.json"
+API_USAGE_FILE = "api_usage_log.json"
+
+# API 使用限制設定
+MAX_API_CALLS_PER_DAY = 2
+MAX_CACHE_HOURS = 24
 
 app = FastAPI(
     title="台積電 ADR 換算 API",
@@ -97,15 +102,70 @@ def is_cache_valid(cache_data):
     today = datetime.date.today().isoformat()
     return cache_data.get('date') == today
 
+def load_api_usage():
+    """載入 API 使用記錄"""
+    if os.path.exists(API_USAGE_FILE):
+        try:
+            with open(API_USAGE_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_api_usage(usage_data):
+    """儲存 API 使用記錄"""
+    try:
+        with open(API_USAGE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(usage_data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"無法儲存 API 使用記錄: {e}")
+
+def check_api_limit():
+    """檢查今日 API 呼叫次數是否超限"""
+    today = datetime.date.today().isoformat()
+    usage = load_api_usage()
+    
+    daily_usage = usage.get(today, {})
+    calls_today = daily_usage.get('calls', 0)
+    
+    return calls_today < MAX_API_CALLS_PER_DAY
+
+def record_api_call(api_name):
+    """記錄 API 呼叫"""
+    today = datetime.date.today().isoformat()
+    now = datetime.datetime.now().isoformat()
+    usage = load_api_usage()
+    
+    if today not in usage:
+        usage[today] = {'calls': 0, 'log': []}
+    
+    usage[today]['calls'] += 1
+    usage[today]['log'].append({
+        'api': api_name,
+        'timestamp': now
+    })
+    
+    save_api_usage(usage)
+    return usage[today]['calls']
+
 # ===============================
 # 核心業務邏輯函數
 # ===============================
 def fetch_adr_price():
-    """從 Alpha Vantage 抓取 ADR 價格"""
+    """從 Alpha Vantage 抓取 ADR 價格（帶 API 限制檢查）"""
+    # 檢查 API 限制
+    if not check_api_limit():
+        print(f"⚠️  API 呼叫已達每日限制 ({MAX_API_CALLS_PER_DAY} 次)")
+        return None
+    
     try:
         url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=TSM&apikey={ALPHA_VANTAGE_API_KEY}"
         res = requests.get(url, timeout=10)
         data = res.json()
+        
+        # 記錄 API 呼叫
+        calls_today = record_api_call('ALPHA_VANTAGE_ADR')
+        print(f"📊 Alpha Vantage API 呼叫次數: {calls_today}/{MAX_API_CALLS_PER_DAY}")
         
         if "Global Quote" in data:
             return float(data["Global Quote"]["05. price"])
@@ -158,31 +218,48 @@ def get_cached_prices():
             'cache_date': cache.get('date')
         }
     
-    # 快取過期，重新抓取
-    adr_price = fetch_adr_price()
-    tw_price = fetch_tw_price()
-    usd_twd = fetch_usd_twd()
+    # 快取過期，重新抓取（受 API 限制保護）
+    print(f"📅 快取過期，嘗試更新價格資料...")
     
-    # 更新快取
-    today = datetime.date.today().isoformat()
-    now = datetime.datetime.now().isoformat()
+    adr_price = fetch_adr_price()  # 受 API 限制保護
+    tw_price = fetch_tw_price()    # 台股資料免費
+    usd_twd = fetch_usd_twd()      # 銀行匯率免費
     
-    cache = {
-        'date': today,
-        'adr_price': adr_price,
-        'tw_price': tw_price,
-        'usd_twd': usd_twd,
-        'last_updated': now
-    }
-    save_cache(cache)
-    
-    return {
-        'adr_price': adr_price,
-        'tw_price': tw_price,
-        'usd_twd': usd_twd,
-        'last_updated': now,
-        'cache_date': today
-    }
+    # 只有在成功獲取 ADR 價格時才更新快取
+    if adr_price is not None:
+        today = datetime.date.today().isoformat()
+        now = datetime.datetime.now().isoformat()
+        
+        cache = {
+            'date': today,
+            'adr_price': adr_price,
+            'tw_price': tw_price,
+            'usd_twd': usd_twd,
+            'last_updated': now,
+            'data_source': 'fresh_api_call'
+        }
+        save_cache(cache)
+        print(f"✅ 快取已更新，所有用戶將看到相同的最新資料")
+        
+        return {
+            'adr_price': adr_price,
+            'tw_price': tw_price,
+            'usd_twd': usd_twd,
+            'last_updated': now,
+            'cache_date': today,
+            'data_source': 'fresh_api_call'
+        }
+    else:
+        # API 限制達到，返回舊快取（如果有的話）
+        print(f"⚠️  API 限制達到，返回現有快取資料")
+        return {
+            'adr_price': cache.get('adr_price'),
+            'tw_price': tw_price,  # 台股和匯率仍可更新
+            'usd_twd': usd_twd,
+            'last_updated': cache.get('last_updated'),
+            'cache_date': cache.get('date'),
+            'data_source': 'cached_due_to_api_limit'
+        }
 
 def fetch_historical_data():
     """抓取歷史資料"""
@@ -309,8 +386,34 @@ async def get_historical_data():
 
 @app.get("/api/health")
 async def health_check():
-    """健康檢查"""
-    return {"status": "healthy", "timestamp": datetime.datetime.now().isoformat()}
+    """健康檢查和系統狀態"""
+    today = datetime.date.today().isoformat()
+    usage = load_api_usage()
+    daily_usage = usage.get(today, {})
+    calls_today = daily_usage.get('calls', 0)
+    
+    cache = load_cache()
+    cache_valid = is_cache_valid(cache)
+    
+    return {
+        "status": "healthy", 
+        "timestamp": datetime.datetime.now().isoformat(),
+        "api_usage": {
+            "calls_today": calls_today,
+            "limit": MAX_API_CALLS_PER_DAY,
+            "remaining": MAX_API_CALLS_PER_DAY - calls_today
+        },
+        "cache_status": {
+            "valid": cache_valid,
+            "last_updated": cache.get('last_updated'),
+            "cache_date": cache.get('date')
+        },
+        "system_info": {
+            "version": "1.0.0",
+            "shared_cache": "enabled",
+            "api_protection": "enabled"
+        }
+    }
 
 if __name__ == "__main__":
     import uvicorn

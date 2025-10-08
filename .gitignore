@@ -32,10 +32,13 @@ venv.bak/
 config_private.py
 secrets.py
 
-# 快取檔案
+# 快取檔案和運行時文件
 daily_prices_cache.json
 price_history_cache.json
+api_usage_log.json
 *.log
+.streamlit_pid
+streamlit_monitor.log
 
 # Streamlit
 .streamlit/

@@ -11,8 +11,13 @@ from plotly.subplots import make_subplots
 import os
 from datetime import datetime
 
-# 後端 API 設定 - 使用你的實際 Render 部署
-API_BASE_URL = os.getenv('API_BASE_URL', 'https://tsmc-adr-converter.onrender.com')
+# 後端 API 設定 - 支援多種部署環境
+try:
+    # 優先使用 Streamlit Cloud secrets
+    API_BASE_URL = st.secrets.get("API_BASE_URL", os.getenv('API_BASE_URL', 'https://tsmc-adr-converter.onrender.com'))
+except:
+    # 備用：使用環境變數或預設值
+    API_BASE_URL = os.getenv('API_BASE_URL', 'https://tsmc-adr-converter.onrender.com')
 
 # 備用 API 端點（支援多種免費服務）
 FALLBACK_URLS = [
