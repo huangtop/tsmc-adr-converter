@@ -1,34 +1,32 @@
 # 台積電 ADR ↔ 台股換算工具
 
-一個簡單的台積電 ADR 與台股價格換算計算機，包含歷史價差圖表分析。
+台積電 ADR 與台股價格換算計算機，包含歷史價差分析。
 
-## 功能特色
+## 功能
 
-- 💰 ADR 與台股價格即時換算
-- 📈 歷史價差趨勢圖表
-- 📊 統計分析（平均價差、溢價/折價）
-- 🔄 自動資料更新
+- ADR 與台股價格換算
+- 歷史價差趨勢圖表  
+- 統計分析（平均價差、溢價/折價）
+- 自動資料更新
 
 ## 換算公式
 
-- **1 張台積電台股 = 5 股 TSM ADR**
-- **台股價格 = ADR價格 ÷ 5 × USD/TWD匯率**
+- 1 張台積電台股 = 5 股 TSM ADR
+- 台股價格 = ADR價格 ÷ 5 × USD/TWD匯率
 
-## 快速開始
+## 使用方式
 
-### 推薦方式：使用雲端後端 ⭐
-
-只需啟動前端，後端已部署至雲端：
-
+自動重啟模式（推薦）：
 ```bash
-./start_frontend.sh
+./streamlit_monitor.sh monitor
 ```
 
-或手動執行：
+手動啟動：
 ```bash
-cd frontend
-streamlit run streamlit_app.py
+./streamlit_monitor.sh start
 ```
+
+開啟瀏覽器前往：`http://localhost:8501`
 
 ### 本地開發（完整環境）
 
@@ -53,43 +51,21 @@ streamlit run streamlit_app.py
 ## 系統需求
 
 - Python 3.8+
-- Alpha Vantage API Key (免費註冊)
+- 網路連線
 
-## 技術架構
+## 管理命令
 
-- 後端：FastAPI
-- 前端：Streamlit
-- 圖表：Plotly
-- 資料源：Alpha Vantage、台灣銀行、證交所
+```bash
+# 檢查狀態
+./streamlit_monitor.sh status
 
-## 免費雲端部署 🆓
+# 重啟服務  
+./streamlit_monitor.sh restart
 
-後端可部署至真正免費的雲端服務，解決本地必須執行服務的問題：
-
-- ⭐ **Render**（推薦）：真正免費，750小時/月，自動休眠
-- 🔄 **Fly.io**：免費額度充足，全球節點
-- 💡 **Koyeb**：新興免費服務，值得嘗試
-
-詳細部署說明：
-- [Render 免費部署指南](RENDER_DEPLOY_GUIDE.md)（推薦）
-- [其他部署方案](DEPLOY.md)
-
-## 架構特色
-
-- 🔄 **前後端分離**：靈活部署，便於擴展
-- 🌐 **雲端優先**：無需本地服務，隨處可用
-- 🛡️ **容錯設計**：多端點備援，提高可用性
-- 💾 **智慧快取**：一日限制2次API，高效節約
-- 🔒 **安全防護**：環境變數管理，程式碼不含敏感資訊
+# 停止服務
+./streamlit_monitor.sh stop
+```
 
 ## 免責聲明
 
-本工具僅供學習研究用途，所有資料僅供參考，不構成投資建議。
-
-## 授權
-
-MIT License
-
----
-
-Made with ❤️ for Taiwan investors
+本工具僅供參考，不構成投資建議。

@@ -1,154 +1,111 @@
-# 台積電 ADR 換算計算機 - 前後端分離架構
+# 系統架構
 
-## 🏗️ 架構概覽
+## 專案結構
 
 ```
 tsmc-adr-converter/
-├── backend/                 # 後端 API 服務
-│   ├── api_server.py       # FastAPI 應用
-│   └── requirements.txt    # 後端依賴
-├── frontend/               # 前端 Streamlit 應用
-│   ├── streamlit_app.py    # Streamlit 應用
-│   └── requirements.txt    # 前端依賴
-├── tsmc_adr_converter.py   # 原始整合版本
-├── requirements.txt        # 原始依賴檔案
-└── README.md              # 專案說明
+├── backend/                    # 後端 API 服務
+│   ├── api_server.py          # FastAPI 應用
+│   └── requirements.txt       # 後端依賴
+├── frontend/                  # 前端應用  
+│   ├── streamlit_app.py       # Streamlit 主程式
+│   └── requirements.txt       # 前端依賴
+├── legacy/                    # 舊版備份
+├── streamlit_monitor.sh       # 自動重啟腳本
+├── start_frontend.sh          # 前端啟動腳本
+├── requirements.txt           # 部署依賴
+└── USER_GUIDE.md             # 使用說明
 ```
 
-## 🔒 安全架構優勢
+## 系統設計
 
-### 1. **邏輯與展示分離**
-- **後端**：處理所有核心業務邏輯、API Key、資料抓取
-- **前端**：純展示層，只負責用戶介面和 API 呼叫
+- 後端：FastAPI 服務，處理資料和快取
+- 前端：Streamlit 介面，用戶互動
+- 快取：共享快取系統，減少 API 呼叫
+- 監控：自動重啟機制
 
-### 2. **API Key 保護**
-- API Key 只存在後端服務中
-- 前端完全不接觸敏感資料
-- 可透過環境變數或雲端密鑰管理
+## API 端點
 
-### 3. **可擴展性**
-- 後端 API 可服務多個前端應用
-- 容易增加新功能和 API 端點
-- 支援負載平衡和水平擴展
+- `/api/health` - 系統健康檢查
+- `/api/prices` - 取得價格資料
+- `/api/convert` - ADR 價格換算
+- `/api/historical` - 歷史資料
 
-## 🚀 部署方案
+## 快取機制
 
-### 方案 A：本地開發環境
+- 價格資料每日更新一次
+- 所有用戶共享相同快取
+- API 呼叫次數限制保護
 
-#### 1. 啟動後端服務
+## 換算公式
+
+台股價格 = ADR價格 ÷ 5 × USD/TWD匯率
+
+### 資料流程
+1. 前端接收用戶請求
+2. 呼叫後端 API 端點
+3. 後端檢查快取有效性
+4. 必要時從外部 API 抓取資料
+5. 更新快取並回傳結果
+6. 前端顯示計算結果
+
+## 部署配置
+
+### 本地開發
 ```bash
+# 後端服務
 cd backend
-pip install -r requirements.txt
-uvicorn api_server:app --reload --host 0.0.0.0 --port 8000
-```
+uvicorn api_server:app --reload --port 8000
 
-#### 2. 啟動前端應用
-```bash
-cd frontend
-pip install -r requirements.txt
-export API_BASE_URL=http://localhost:8000
+# 前端應用
+cd frontend  
 streamlit run streamlit_app.py
 ```
 
-### 方案 B：雲端部署
+### 雲端部署
+後端已部署至 Render 免費服務，前端使用自動重啟監控腳本：
 
-#### 後端部署 (推薦 Railway/Render/AWS Lambda)
-
-**Railway 部署：**
 ```bash
-# 1. 安裝 Railway CLI
-npm install -g @railway/cli
+# 使用自動監控啟動
+./streamlit_monitor.sh monitor
 
-# 2. 登入並部署
-cd backend
-railway login
-railway init
-railway add
-railway deploy
+# 手動啟動
+./streamlit_monitor.sh start
 ```
 
-**環境變數設定：**
+### 環境變數
 ```env
-ALPHA_VANTAGE_API_KEY=your_actual_api_key
-PORT=8000
+# 後端 (Render 環境變數)
+ALPHA_VANTAGE_API_KEY=your_api_key
+
+# 前端 (本地環境變數)  
+API_BASE_URL=https://tsmc-adr-converter.onrender.com
 ```
 
-#### 前端部署 (Streamlit Cloud)
-
-**streamlit_app.py 設定：**
-```python
-# 改為你的後端 API URL
-API_BASE_URL = os.getenv('API_BASE_URL', 'https://your-backend-domain.railway.app')
-```
-
-### 方案 C：容器化部署
-
-#### Docker Compose 設定
-```yaml
-version: '3.8'
-services:
-  backend:
-    build: ./backend
-    ports:
-      - "8000:8000"
-    environment:
-      - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY}
-    
-  frontend:
-    build: ./frontend
-    ports:
-      - "8501:8501"
-    environment:
-      - API_BASE_URL=http://backend:8000
-    depends_on:
-      - backend
-```
-
-## 📊 API 端點說明
-
-### 後端 API 端點
+## API 端點
 
 | 端點 | 方法 | 說明 |
 |------|------|------|
-| `/` | GET | API 服務資訊 |
-| `/api/health` | GET | 健康檢查 |
-| `/api/prices` | GET | 取得當前價格資料 |
+| `/` | GET | 服務狀態 |
+| `/api/health` | GET | 系統健康檢查 |
+| `/api/prices` | GET | 當前價格資料 |
 | `/api/convert` | POST | ADR 換算計算 |
-| `/api/historical` | GET | 歷史價差資料 |
+| `/api/historical` | GET | 歷史資料 |
 
-### API 使用範例
+## 開發測試
 
-**取得當前價格：**
-```bash
-curl http://localhost:8000/api/prices
-```
-
-**進行換算計算：**
-```bash
-curl -X POST http://localhost:8000/api/convert \
-  -H "Content-Type: application/json" \
-  -d '{"adr_price": 150.0, "usd_twd": 32.0}'
-```
-
-## 🔧 開發與測試
-
-### 後端 API 測試
+### 後端測試
 ```bash
 cd backend
 uvicorn api_server:app --reload
-
-# 訪問 API 文檔
-open http://localhost:8000/docs
+# API 文檔: http://localhost:8000/docs
 ```
 
-### 前端測試
+### 前端測試  
 ```bash
 cd frontend
-export API_BASE_URL=http://localhost:8000
 streamlit run streamlit_app.py
-
-# 訪問前端應用
-open http://localhost:8501
+# 應用介面: http://localhost:8501
 ```
 
 ## 🛡️ 安全考量
@@ -208,5 +165,3 @@ if st.button("計算換算"):
     # Google Analytics 或其他追蹤碼
     st.write("<!-- 追蹤碼 -->", unsafe_allow_html=True)
 ```
-
-這個架構完全符合你的需求：核心邏輯在後端保護，前端只負責展示，安全且可擴展！
