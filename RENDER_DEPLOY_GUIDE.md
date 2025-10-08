@@ -29,7 +29,12 @@ Render 提供真正的免費方案，非常適合我們的需求！
    Root Directory: (留空)
    Runtime: Python 3
    Build Command: pip install -r requirements.txt
-   Start Command: uvicorn backend.api_server:app --host 0.0.0.0 --port $PORT
+   Start Command: ./start_render.sh
+   ```
+   
+   **或者使用直接命令**：
+   ```
+   Start Command: uvicorn backend.api_server:app --host=0.0.0.0 --port=$PORT
    ```
 
 4. **選擇免費方案**：
