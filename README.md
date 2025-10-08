@@ -62,15 +62,17 @@ streamlit run streamlit_app.py
 - 圖表：Plotly
 - 資料源：Alpha Vantage、台灣銀行、證交所
 
-## 雲端部署
+## 免費雲端部署 🆓
 
-後端可部署至免費雲端服務，解決本地必須執行服務的問題：
+後端可部署至真正免費的雲端服務，解決本地必須執行服務的問題：
 
-- ✅ **Railway**（推薦）：自動檢測，簡單部署
-- ✅ **Render**：穩定可靠，免費方案充足  
-- ✅ **Streamlit Cloud**：專為 Streamlit 優化
+- ⭐ **Render**（推薦）：真正免費，750小時/月，自動休眠
+- 🔄 **Fly.io**：免費額度充足，全球節點
+- 💡 **Koyeb**：新興免費服務，值得嘗試
 
-詳細部署說明請參考 [部署指南](DEPLOY.md)。
+詳細部署說明：
+- [Render 免費部署指南](RENDER_DEPLOY_GUIDE.md)（推薦）
+- [其他部署方案](DEPLOY.md)
 
 ## 架構特色
 

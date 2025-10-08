@@ -11,14 +11,14 @@ from plotly.subplots import make_subplots
 import os
 from datetime import datetime
 
-# 後端 API 設定 - 優先使用雲端部署版本
-API_BASE_URL = os.getenv('API_BASE_URL', 'https://your-app-name.railway.app')
+# 後端 API 設定 - 優先使用免費的 Render 部署
+API_BASE_URL = os.getenv('API_BASE_URL', 'https://your-app-name.onrender.com')
 
-# 備用 API 端點（如果你有多個部署）
+# 備用 API 端點（支援多種免費服務）
 FALLBACK_URLS = [
-    'https://your-app-name.railway.app',
-    'https://your-app-name.onrender.com',
-    'http://localhost:8000'  # 本地開發時的備用
+    'https://your-app-name.onrender.com',  # Render (推薦)
+    'https://your-app-name.fly.dev',       # Fly.io
+    'http://localhost:8000'                # 本地開發
 ]
 
 # ===============================
